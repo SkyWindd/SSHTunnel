@@ -1,0 +1,5 @@
+# SSH Tunnel Manager — Python dependencies
+# User chỉ cần file này khi chạy script thuần (không dùng binary)
+# Binary đã bundle sẵn tất cả dependency
+
+cryptography>=41.0.0

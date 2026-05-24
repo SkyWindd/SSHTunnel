@@ -1,0 +1,7 @@
+*.pem
+*.ppk
+
+default_vps.pem
+default_vps.ppk
+config.json
+tunnel.log
