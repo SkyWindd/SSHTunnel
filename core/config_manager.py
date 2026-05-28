@@ -14,7 +14,7 @@ from core.models import (
     AppConfig, VpsConfig, TunnelConfig,
     MachineRole, VpsMode, ConnectionType
 )
-from core.key_manager import KeyManager, KeyMode
+from core.key_manager import KeyManager, KeyMode, _plain_file as plain_file, _encrypted_file as encrypted_file
 from core.session_manager import SessionManager
 
 CONFIG_FILE = 'config.json'
@@ -101,13 +101,22 @@ class ConfigManager:
         """Ghi config ra file JSON."""
         path = ConfigManager._config_path()
         try:
-            path.write_text(
-                json.dumps(ConfigManager._to_dict(cfg), indent=2, ensure_ascii=False),
-                encoding='utf-8'
-            )
+            json_str = json.dumps(ConfigManager._to_dict(cfg), indent=2, ensure_ascii=False)
+            # Lớp bảo vệ thứ 2: loại bỏ surrogate nếu còn sót lại
+            json_str = json_str.encode('utf-8', errors='ignore').decode('utf-8')
+            path.write_text(json_str, encoding='utf-8')
             Logger.info(f"Config saved to '{CONFIG_FILE}'")
         except Exception as e:
             Logger.error(f'Lỗi ghi config: {e}')
+
+    @staticmethod
+    def _sanitize_input(text: str) -> str:
+        """
+        Loại bỏ surrogate characters khỏi chuỗi input().
+        Cần thiết trên Linux khi terminal encoding không khớp UTF-8,
+        dẫn đến surrogate escape (ví dụ: \\udcc3) làm crash json.dumps.
+        """
+        return text.encode('utf-8', errors='ignore').decode('utf-8')
 
     @staticmethod
     def run_setup_wizard() -> AppConfig:
@@ -140,7 +149,7 @@ class ConfigManager:
         print('  Examples: nhom1, alice-bob, dev-team')
         print('  Rules: 3–32 chars, letters/numbers/dash/underscore only.')
         while True:
-            session_id = input('  Session ID: ').strip()
+            session_id = ConfigManager._sanitize_input(input('  Session ID: ').strip())
             if SessionManager.is_valid(session_id):
                 cfg.session_id = session_id
                 break
@@ -207,23 +216,25 @@ class ConfigManager:
             print(f'{Color.RED}  ✘  Sai mật khẩu 3 lần.{Color.RESET}')
 
         elif mode == KeyMode.Plain:
-            if platform.system() != 'Windows':
-                # Linux: có .pem → dùng thẳng
-                Logger.info('Dùng file key .pem trực tiếp.')
-            else:
-                # Windows: có .ppk → hỏi đặt password mã hóa
-                print(f'\n{Color.YELLOW}  ℹ  Phát hiện file key chưa mã hóa.')
-                print('     Hãy đặt Group Password để mã hóa key ngay bây giờ.')
-                print(f'     Password này dùng chung cho cả nhóm.{Color.RESET}')
+            # Có file key plain — hỏi có muốn mã hóa không (cả Windows lẫn Linux)
+            pname = plain_file()
+            ename = encrypted_file()
+            print(f"\n{Color.YELLOW}  ℹ  Phát hiện file '{pname}' chưa mã hóa.")
+            print('     Khuyến nghị mã hóa để bảo vệ key khi phân phối.')
+            val = input('     Mã hóa key ngay bây giờ? (Y/n): ').strip().lower()
+            if val != 'n':
                 password = ConfigManager._set_group_password_interactive()
                 if password:
                     try:
                         KeyManager.encrypt_plain_key(password)
                         DefaultVpsProvider.unlock_with_password(password)
                         print(f'{Color.GREEN}  ✔  Key đã mã hóa và mở khóa thành công!{Color.RESET}')
-                        print(f'{Color.YELLOW}  ⚠  Hãy XÓA file \'default_vps.ppk\' gốc sau khi setup xong.{Color.RESET}')
+                        print(f"{Color.YELLOW}  ⚠  Hãy XÓA file '{pname}' gốc.")
+                        print(f"     Chỉ giữ lại '{ename}' — an toàn khi upload GitHub.{Color.RESET}")
                     except Exception as e:
                         Logger.error(f'Mã hóa thất bại: {e}')
+            else:
+                Logger.info(f"Bỏ qua mã hóa — dùng {pname} trực tiếp.")
 
         elif mode == KeyMode.Missing:
             plain_name = 'default_vps.pem' if platform.system() != 'Windows' else 'default_vps.ppk'

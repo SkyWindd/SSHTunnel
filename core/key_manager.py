@@ -3,12 +3,14 @@ KeyManager — tương đương KeyManager.cs
 Mã hóa / giải mã file key VPS bằng AES-256-GCM với group password.
 
 Layout file .enc: [salt 16B][nonce 12B][tag 16B][ciphertext]
-Hoàn toàn tương thích với C# version — file .enc tạo từ C# đọc được bằng Python và ngược lại.
+Tương thích hoàn toàn với C# version.
+
+Windows: default_vps.ppk  → default_vps.ppk.enc
+Linux:   default_vps.pem  → default_vps.pem.enc
 """
 
 import os
 import platform
-import subprocess
 import tempfile
 from enum import Enum, auto
 from pathlib import Path
@@ -19,14 +21,21 @@ from cryptography.hazmat.primitives import hashes
 
 from core.logger import Logger
 
-# ── Constants — phải giống hệt C# ─────────────────────────
-ENCRYPTED_FILE   = 'default_vps.ppk.enc'
-PLAIN_FILE_WIN   = 'default_vps.ppk'
-PLAIN_FILE_LINUX = 'default_vps.pem'
+# ── Constants ──────────────────────────────────────────────
 PBKDF2_ITERATIONS = 200_000
 SALT_SIZE         = 16
 NONCE_SIZE        = 12
 TAG_SIZE          = 16
+
+# File names theo OS
+def _plain_file() -> str:
+    return 'default_vps.ppk' if platform.system() == 'Windows' else 'default_vps.pem'
+
+def _encrypted_file() -> str:
+    return 'default_vps.ppk.enc' if platform.system() == 'Windows' else 'default_vps.pem.enc'
+
+# Backward compat: C# dùng .ppk.enc — Linux cũng check file này
+_LEGACY_ENC = 'default_vps.ppk.enc'
 
 
 class KeyMode(Enum):
@@ -41,10 +50,8 @@ class KeyManager:
 
     @staticmethod
     def app_dir() -> Path:
-        """Thư mục chứa executable / script."""
         import sys
         if getattr(sys, 'frozen', False):
-            # PyInstaller binary
             return Path(sys.executable).parent
         return Path(__file__).parent.parent
 
@@ -52,34 +59,54 @@ class KeyManager:
     def detect_mode() -> KeyMode:
         """
         Kiểm tra trạng thái file key.
-        Linux: ưu tiên .pem trước — nếu có .pem dùng luôn.
-        Windows: kiểm tra .enc rồi .ppk.
+
+        Thứ tự ưu tiên:
+          Linux:   .pem.enc > .ppk.enc (legacy) > .pem (plain)
+          Windows: .ppk.enc > .ppk (plain)
+
+        NOTE: Encrypted luôn ưu tiên hơn Plain —
+        tránh trường hợp vừa mã hóa xong nhưng chưa xóa file gốc
+        lại bị hỏi mã hóa lần nữa.
         """
         d = KeyManager.app_dir()
 
-        # Linux: ưu tiên .pem trực tiếp
         if platform.system() != 'Windows':
-            if (d / PLAIN_FILE_LINUX).exists():
+            # Linux: kiểm tra encrypted TRƯỚC plain
+            if (d / 'default_vps.pem.enc').exists():
+                return KeyMode.Encrypted
+            if (d / _LEGACY_ENC).exists():
+                return KeyMode.Encrypted
+            if (d / 'default_vps.pem').exists():
                 return KeyMode.Plain
-
-        # Windows hoặc Linux không có .pem
-        if (d / ENCRYPTED_FILE).exists():
-            return KeyMode.Encrypted
-        if (d / PLAIN_FILE_WIN).exists():
-            return KeyMode.Plain
+        else:
+            # Windows
+            if (d / 'default_vps.ppk.enc').exists():
+                return KeyMode.Encrypted
+            if (d / 'default_vps.ppk').exists():
+                return KeyMode.Plain
 
         return KeyMode.Missing
 
     @staticmethod
     def decrypt_to_memory(password: str) -> bytes:
         """
-        Giải mã file .enc bằng password → trả về bytes trong RAM.
-        KHÔNG ghi file ra đĩa.
-        Tương thích hoàn toàn với C# version.
+        Giải mã file .enc → bytes trong RAM.
+        Tự tìm đúng file .enc theo OS.
         """
-        path = KeyManager.app_dir() / ENCRYPTED_FILE
-        if not path.exists():
-            raise FileNotFoundError(f"Không tìm thấy '{ENCRYPTED_FILE}'")
+        d    = KeyManager.app_dir()
+        path = None
+
+        if platform.system() != 'Windows':
+            # Linux: thử .pem.enc trước, rồi legacy .ppk.enc
+            if (d / 'default_vps.pem.enc').exists():
+                path = d / 'default_vps.pem.enc'
+            elif (d / _LEGACY_ENC).exists():
+                path = d / _LEGACY_ENC
+        else:
+            path = d / 'default_vps.ppk.enc'
+
+        if not path or not path.exists():
+            raise FileNotFoundError(f"Không tìm thấy file .enc")
 
         data = path.read_bytes()
         min_size = SALT_SIZE + NONCE_SIZE + TAG_SIZE
@@ -92,30 +119,30 @@ class KeyManager:
         ciphertext = data[SALT_SIZE + NONCE_SIZE + TAG_SIZE:]
 
         key = KeyManager._derive_key(password, salt)
-
         try:
-            aesgcm = AESGCM(key)
-            # AESGCM của Python expect ciphertext + tag ghép lại
-            plaintext = aesgcm.decrypt(nonce, ciphertext + tag, None)
+            aesgcm      = AESGCM(key)
+            plaintext   = aesgcm.decrypt(nonce, ciphertext + tag, None)
             return plaintext
         except Exception:
             raise PermissionError('Sai mật khẩu nhóm hoặc file bị hỏng.')
         finally:
-            # Zero out key trong memory
             key = b'\x00' * len(key)
 
     @staticmethod
     def encrypt_plain_key(password: str) -> None:
         """
-        Mã hóa file .ppk thành .ppk.enc bằng password.
-        Dùng khi setup lần đầu (người quản lý chạy).
+        Mã hóa file key gốc thành .enc.
+        Windows: default_vps.ppk  → default_vps.ppk.enc
+        Linux:   default_vps.pem  → default_vps.pem.enc
         """
-        d         = KeyManager.app_dir()
-        plain_path = d / PLAIN_FILE_WIN
-        enc_path   = d / ENCRYPTED_FILE
+        d          = KeyManager.app_dir()
+        plain_name = _plain_file()
+        enc_name   = _encrypted_file()
+        plain_path = d / plain_name
+        enc_path   = d / enc_name
 
         if not plain_path.exists():
-            raise FileNotFoundError(f"Không tìm thấy '{PLAIN_FILE_WIN}' để mã hóa.")
+            raise FileNotFoundError(f"Không tìm thấy '{plain_name}' để mã hóa.")
 
         plaintext = plain_path.read_bytes()
         salt  = os.urandom(SALT_SIZE)
@@ -123,42 +150,31 @@ class KeyManager:
         key   = KeyManager._derive_key(password, salt)
 
         try:
-            aesgcm = AESGCM(key)
-            # Python AESGCM trả về ciphertext + tag ghép lại (16 bytes tag ở cuối)
+            aesgcm      = AESGCM(key)
             ct_with_tag = aesgcm.encrypt(nonce, plaintext, None)
             ciphertext  = ct_with_tag[:-TAG_SIZE]
             tag         = ct_with_tag[-TAG_SIZE:]
 
-            # Ghi: [salt][nonce][tag][ciphertext] — giống hệt C#
             with open(enc_path, 'wb') as f:
-                f.write(salt)
-                f.write(nonce)
-                f.write(tag)
-                f.write(ciphertext)
+                f.write(salt + nonce + tag + ciphertext)
 
-            Logger.success(f"Đã mã hóa → '{ENCRYPTED_FILE}' ({enc_path.stat().st_size} bytes)")
-            Logger.info('File này có thể upload GitHub an toàn.')
+            Logger.success(f"Đã mã hóa '{plain_name}' → '{enc_name}' ({enc_path.stat().st_size} bytes)")
+            Logger.info('File .enc có thể upload GitHub an toàn.')
         finally:
             key = b'\x00' * len(key)
 
     @staticmethod
     def write_temp_key(key_bytes: bytes) -> str:
-        """
-        Ghi bytes key ra file tạm, trả về đường dẫn.
-        Linux: dùng .pem, Windows: dùng .ppk
-        File tạm sẽ bị xóa khi gọi delete_temp_key().
-        """
+        """Ghi bytes key ra file tạm, trả về đường dẫn."""
         ext  = 'ppk' if platform.system() == 'Windows' else 'pem'
         tmp  = tempfile.NamedTemporaryFile(
-            prefix='stm_', suffix=f'.{ext}',
-            delete=False
+            prefix='stm_', suffix=f'.{ext}', delete=False
         )
         tmp.write(key_bytes)
         tmp.close()
         path = tmp.name
 
         if platform.system() != 'Windows':
-            # Linux: chmod 600
             try:
                 os.chmod(path, 0o600)
             except Exception:
@@ -167,10 +183,7 @@ class KeyManager:
 
     @staticmethod
     def delete_temp_key(path: str) -> None:
-        """
-        Xóa file key tạm khỏi đĩa an toàn.
-        Ghi đè bằng 0 trước khi xóa.
-        """
+        """Xóa file key tạm an toàn."""
         if not path or not Path(path).exists():
             return
         try:
@@ -184,50 +197,43 @@ class KeyManager:
 
     @staticmethod
     def resolve_key_path() -> str:
-        """
-        Tìm đường dẫn file key theo OS.
-        Linux: ưu tiên .pem trước.
-        Windows: tìm .ppk.
-        """
+        """Tìm đường dẫn file key plain theo OS."""
         d = KeyManager.app_dir()
 
         if platform.system() != 'Windows':
-            pem = d / PLAIN_FILE_LINUX
+            pem = d / 'default_vps.pem'
             if pem.exists():
                 return str(pem)
+        else:
+            ppk = d / 'default_vps.ppk'
+            if ppk.exists():
+                return str(ppk)
 
-        ppk = d / PLAIN_FILE_WIN
-        if ppk.exists():
-            return str(ppk)
-
-        # Fallback
-        return str(d / (PLAIN_FILE_LINUX if platform.system() != 'Windows' else PLAIN_FILE_WIN))
+        plain_name = _plain_file()
+        return str(d / plain_name)
 
     @staticmethod
     def print_key_status() -> None:
-        """Hiển thị trạng thái key và hướng dẫn."""
-        mode = KeyManager.detect_mode()
-        plain_name = PLAIN_FILE_LINUX if platform.system() != 'Windows' else PLAIN_FILE_WIN
+        """Hiển thị trạng thái key."""
+        mode       = KeyManager.detect_mode()
+        plain_name = _plain_file()
+        enc_name   = _encrypted_file()
 
         from core.logger import Color
         if mode == KeyMode.Encrypted:
-            print(f'\n{Color.GREEN}  Key status: ✔  \'{ENCRYPTED_FILE}\' (đã mã hóa — an toàn){Color.RESET}')
+            print(f'\n{Color.GREEN}  Key status: ✔  \'{enc_name}\' (đã mã hóa — an toàn){Color.RESET}')
             print('     Nhập group password để sử dụng.')
         elif mode == KeyMode.Plain:
             print(f'\n{Color.YELLOW}  Key status: ⚠  \'{plain_name}\' (chưa mã hóa — KHÔNG nên upload GitHub){Color.RESET}')
-            print('     Dùng menu [8] Setup → mã hóa key để bảo vệ.')
+            print('     Dùng menu [8] Setup hoặc flag --encrypt-key để mã hóa.')
         else:
-            print(f'\n{Color.RED}  Key status: ✘  Không tìm thấy \'{plain_name}\' hoặc \'{ENCRYPTED_FILE}\'{Color.RESET}')
+            print(f'\n{Color.RED}  Key status: ✘  Không tìm thấy \'{plain_name}\' hoặc \'{enc_name}\'{Color.RESET}')
             print(f'     Đặt file {plain_name} vào cùng thư mục với SshTunnelManager')
 
     # ── Private helpers ────────────────────────────────────
 
     @staticmethod
     def _derive_key(password: str, salt: bytes) -> bytes:
-        """
-        PBKDF2-SHA256, 200000 vòng, 32 bytes.
-        Giống hệt C# Rfc2898DeriveBytes.Pbkdf2.
-        """
         kdf = PBKDF2HMAC(
             algorithm  = hashes.SHA256(),
             length     = 32,

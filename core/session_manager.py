@@ -17,36 +17,40 @@ class SessionManager:
 
     @staticmethod
     def session_id_to_port(session_id: str) -> int:
-        """
-        Hash session ID → port number trong range 10000-19999.
-        Dùng SHA256 để phân phối đều, collision cực kỳ hiếm.
-        """
+        """Hash session ID → port number trong range 10000-19999."""
         if not session_id or not session_id.strip():
             raise ValueError('Session ID cannot be empty.')
-
-        digest = hashlib.sha256(session_id.strip().lower().encode('utf-8')).digest()
-        # Lấy 4 bytes đầu làm uint32, mod vào range
+        # Luôn dùng cleaned version để đảm bảo consistency
+        clean = SessionManager.clean_session_id(session_id.strip().lower())
+        digest = hashlib.sha256(clean.encode('utf-8')).digest()
         value = int.from_bytes(digest[:4], 'little') % PORT_RANGE_SIZE
         return PORT_RANGE_START + value
 
     @staticmethod
     def get_session_ports(session_id: str) -> SessionPorts:
-        """
-        Trả về 3 port từ session ID:
-          SSH    → base port
-          RDP    → base port + 1
-          Custom → base port + 2
-        """
-        base = SessionManager.session_id_to_port(session_id)
-        # Đảm bảo không overflow range
+        """Trả về 3 port từ session ID."""
+        # Normalize session_id trước khi tính port
+        clean_id = SessionManager.clean_session_id(session_id.strip())
+        base = SessionManager.session_id_to_port(clean_id)
         if base + 2 > PORT_RANGE_END:
             base -= 2
         return SessionPorts(
-            session_id  = session_id,
+            session_id  = clean_id,
             ssh_port    = base,
             rdp_port    = base + 1,
             custom_port = base + 2,
         )
+
+    @staticmethod
+    def clean_session_id(session_id: str) -> str:
+        """
+        Làm sạch session ID:
+        - NFKD normalize → tách combining diacritics
+        - Giữ lại chỉ ASCII printable, bỏ tất cả whitespace
+        """
+        import unicodedata
+        normalized = unicodedata.normalize('NFKD', session_id)
+        return ''.join(c for c in normalized if ord(c) < 128 and c.isprintable() and not c.isspace())
 
     @staticmethod
     def is_valid(session_id: str) -> bool:
@@ -54,12 +58,15 @@ class SessionManager:
         Kiểm tra session ID hợp lệ:
         - 3-32 ký tự
         - Chỉ dùng chữ cái, số, dấu gạch ngang, gạch dưới
+        - Tự động loại bỏ ký tự ẩn / non-ASCII trước khi kiểm tra
         """
         if not session_id:
             return False
-        if not (3 <= len(session_id) <= 32):
+        cleaned = SessionManager.clean_session_id(session_id)
+        if not (3 <= len(cleaned) <= 32):
             return False
-        return bool(re.match(r'^[a-zA-Z0-9\-_]+$', session_id))
+        # Sau khi clean, chỉ cho phép a-z A-Z 0-9 - _
+        return bool(re.fullmatch(r'[a-zA-Z0-9\-_]+', cleaned))
 
     @staticmethod
     def print_session_info(session_id: str) -> None:

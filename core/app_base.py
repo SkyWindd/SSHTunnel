@@ -143,7 +143,7 @@ class AppBase(ABC):
 
         mode = KeyManager.detect_mode()
         if mode == KeyMode.Missing:
-            print(f'{Color.RED}  ✘ Không tìm thấy file key cần mã hóa.{Color.RESET}')
+            print(f"{Color.RED}  ✘ Không tìm thấy file key cần mã hóa.{Color.RESET}")
             input()
             return
         if mode == KeyMode.Encrypted:
@@ -161,14 +161,24 @@ class AppBase(ABC):
             print(f'{Color.RED}  ✘ Hai lần nhập không khớp.{Color.RESET}')
 
         try:
-            KeyManager.encrypt_plain_key(pwd)
+            import platform
+            if platform.system() != 'Windows':
+                KeyManager.encrypt_plain_key_linux(pwd)
+                plain_name = 'default_vps.pem'
+                enc_name   = 'default_vps.pem.enc'
+            else:
+                KeyManager.encrypt_plain_key(pwd)
+                plain_name = 'default_vps.ppk'
+                enc_name   = 'default_vps.ppk.enc'
             print(f'{Color.GREEN}\n  ✔  Mã hóa thành công!{Color.RESET}')
-            print(f'{Color.YELLOW}  ⚠  XÓA file .ppk gốc, giữ lại .ppk.enc{Color.RESET}')
+            print(f"{Color.YELLOW}  ⚠  XÓA file '{plain_name}' gốc.")
+            print(f"     Chỉ giữ lại '{enc_name}' — an toàn khi upload GitHub.{Color.RESET}")
         except Exception as e:
             Logger.error(f'Mã hóa thất bại: {e}')
         input('\n  Nhấn Enter để thoát...')
 
     def _print_menu_common(self) -> None:
+        """In header status + menu items dùng chung cho Windows và Linux."""
         running = self._monitor and self._monitor.is_running
         status  = '● RUNNING' if running else '○ STOPPED'
         color   = Color.GREEN if running else Color.RED

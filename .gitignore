@@ -1,7 +1,18 @@
+# Private keys — không commit lên repo public
 *.pem
 *.ppk
 
-default_vps.pem
-default_vps.ppk
+# Python cache — tự tạo khi chạy
+__pycache__/
+core/__pycache__/
+windows/__pycache__/
+linux/__pycache__/
+
+# Build artifacts — PyInstaller trung gian, không cần ship
+build/
+
+# Config riêng của từng máy
 config.json
+
+# Log file
 tunnel.log
