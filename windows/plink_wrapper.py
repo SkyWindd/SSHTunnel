@@ -31,6 +31,7 @@ class PlinkWrapper:
         return (
             f'-ssh {vps.username}@{vps.host} -P {vps.port} '
             f'-R {tunnel.vps_port}:localhost:{tunnel.remote_port} '
+            f'-o GatewayPorts=yes '
             f'-N -batch {auth}'
         )
 

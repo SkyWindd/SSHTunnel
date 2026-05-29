@@ -38,6 +38,7 @@ class SshWrapper:
             f'-o ServerAliveInterval=15 '
             f'-o ServerAliveCountMax=3 '
             f'-o ExitOnForwardFailure=yes '
+            f'-o GatewayPorts=yes '
             f'{auth} '
             f'-R {tunnel.vps_port}:localhost:{tunnel.remote_port} '
             f'-N '
