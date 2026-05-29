@@ -30,8 +30,7 @@ class PlinkWrapper:
         auth = PlinkWrapper._build_auth(vps)
         return (
             f'-ssh {vps.username}@{vps.host} -P {vps.port} '
-            f'-R {tunnel.vps_port}:localhost:{tunnel.remote_port} '
-            f'-o GatewayPorts=yes '
+            f'-R 0.0.0.0:{tunnel.vps_port}:localhost:{tunnel.remote_port} '
             f'-N -batch {auth}'
         )
 
