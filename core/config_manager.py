@@ -199,8 +199,6 @@ class ConfigManager:
         entries = SessionBook.load()
 
         if entries:
-            print(f'\n{Color.CYAN}  Đang kiểm tra trạng thái máy B...{Color.RESET}')
-            SessionBook.probe_all(entries, DEFAULT_VPS_HOST)
             SessionBook.print_table(entries, current_session)
             print()
 

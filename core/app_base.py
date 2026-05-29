@@ -107,10 +107,7 @@ class AppBase(ABC):
             print('  Dùng [8] Setup wizard để thêm session mới.')
             return
 
-        # Probe trạng thái máy B
-        print(f'\n{Color.CYAN}  Đang kiểm tra trạng thái máy B...{Color.RESET}')
-        vps_host = self._cfg.vps.host if self._cfg.vps.host else DEFAULT_VPS_HOST
-        SessionBook.probe_all(entries, vps_host)
+        # Hiện bảng sessions
         SessionBook.print_table(entries, self._cfg.session_id)
 
         print('\n  Nhập số để switch, [D] xóa session, [0] quay lại:')
