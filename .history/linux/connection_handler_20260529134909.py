@@ -3,7 +3,6 @@ LinuxConnectionHandler — tương đương LinuxConnectionHandler.cs
 SSH command trực tiếp trong terminal, hướng dẫn Remmina/xfreerdp.
 """
 
-import os
 import subprocess
 from core.connection_handler_base import ConnectionHandlerBase
 from core.models import AppConfig, MachineRole, ConnectionType
@@ -32,18 +31,11 @@ class LinuxConnectionHandler(ConnectionHandlerBase):
         print(f'\n{Color.YELLOW}  Đang kết nối: ssh {username}@127.0.0.1 -p {ssh.local_port}')
         print(f'  (Nhấn Ctrl+D hoặc gõ exit để quay lại app){Color.RESET}\n')
 
-        # Tự động xóa key cũ để tránh lỗi "REMOTE HOST IDENTIFICATION HAS CHANGED"
-        known_hosts = os.path.expanduser('~/.ssh/known_hosts')
-        if os.path.exists(known_hosts):
-            subprocess.run(
-                ['ssh-keygen', '-f', known_hosts, '-R', f'[127.0.0.1]:{ssh.local_port}'],
-                capture_output=True
-            )
-
         try:
             proc = subprocess.Popen(
                 ['ssh', f'{username}@127.0.0.1', '-p', str(ssh.local_port),
-                 '-o', 'StrictHostKeyChecking=accept-new'],
+     '-o', 'StrictHostKeyChecking=accept-new',
+     '-o', 'UpdateHostKeys=yes'],
                 stdin=None,
                 stdout=None,
                 stderr=None,

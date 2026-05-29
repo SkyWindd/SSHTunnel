@@ -1,4 +1,3 @@
-```shellscript
 #!/bin/bash
 # SSH Tunnel Manager -- Launcher (Linux)
 # User chi can: chmod +x run.sh && ./run.sh
@@ -59,5 +58,3 @@ fi
 
 # Chay app
 exec "$APP" "$@"
-
-```

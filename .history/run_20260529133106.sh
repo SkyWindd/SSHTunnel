@@ -1,4 +1,3 @@
-```shellscript
 #!/bin/bash
 # SSH Tunnel Manager -- Launcher (Linux)
 # User chi can: chmod +x run.sh && ./run.sh
@@ -30,7 +29,8 @@ sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh
 sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
 # Tu dong bat SSH Server neu chua chay
-if ! sudo ss -tlnp 2>/dev/null | grep -q ":22"; then
+# Thành dòng này
+if ! sudo service ssh status 2>/dev/null | grep -qE "running|active"; then
     echo -e "${YELLOW}  [SSH] Dang bat SSH server...${NC}"
     sudo service ssh start 2>/dev/null
     echo -e "${GREEN}  [SSH] SSH server da chay!${NC}"
@@ -59,5 +59,3 @@ fi
 
 # Chay app
 exec "$APP" "$@"
-
-```
