@@ -60,3 +60,4 @@ fi
 # Chay app
 exec "$APP" "$@"
 
+```
