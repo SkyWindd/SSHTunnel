@@ -16,6 +16,7 @@ from core.models import (
 )
 from core.key_manager import KeyManager, KeyMode, _plain_file as plain_file, _encrypted_file as encrypted_file
 from core.session_manager import SessionManager
+from core.session_book import SessionBook
 
 CONFIG_FILE = 'config.json'
 
@@ -145,17 +146,7 @@ class ConfigManager:
             print('  Please enter A or B.')
 
         # ── Bước 2: Session ID ────────────────────────────
-        print('\n  Session ID — a short name shared between Machine A and B.')
-        print('  Examples: nhom1, alice-bob, dev-team')
-        print('  Rules: 3–32 chars, letters/numbers/dash/underscore only.')
-        while True:
-            session_id = ConfigManager._sanitize_input(input('  Session ID: ').strip())
-            if SessionManager.is_valid(session_id):
-                cfg.session_id = session_id
-                break
-            print('  Invalid Session ID. Use 3-32 chars, letters/numbers/dash/underscore.')
-
-        SessionManager.print_session_info(cfg.session_id)
+        cfg.session_id = ConfigManager._ask_session_id(current_session='')
 
         # ── Bước 3: VPS Mode ──────────────────────────────
         print('\n  VPS Mode:')
@@ -196,6 +187,57 @@ class ConfigManager:
         return cfg
 
     # ── Private helpers ────────────────────────────────────
+
+    @staticmethod
+    def _ask_session_id(current_session: str = '') -> str:
+        """
+        Hiện bảng saved sessions (với probe máy B), cho phép chọn số
+        hoặc gõ Session ID mới. Nếu mới → hỏi có muốn lưu không.
+        """
+        from core.session_book import SessionBook
+
+        entries = SessionBook.load()
+
+        if entries:
+            print(f'\n{Color.CYAN}  Đang kiểm tra trạng thái máy B...{Color.RESET}')
+            SessionBook.probe_all(entries, DEFAULT_VPS_HOST)
+            SessionBook.print_table(entries, current_session)
+            print()
+
+        print('  Session ID — a short name shared between Machine A and B.')
+        print('  Examples: nhom1, alice-bob, dev-team')
+        print('  Rules: 3–32 chars, letters/numbers/dash/underscore only.')
+        if entries:
+            print('  Nhập số để chọn session đã lưu, hoặc gõ Session ID mới:')
+
+        while True:
+            raw = ConfigManager._sanitize_input(input('  Session ID: ').strip())
+
+            # Chọn theo số
+            if raw.isdigit():
+                idx = int(raw) - 1
+                if 0 <= idx < len(entries):
+                    chosen = entries[idx].session_id
+                    SessionManager.print_session_info(chosen)
+                    return chosen
+                print(f'  Số không hợp lệ (1-{len(entries)}).')
+                continue
+
+            # Gõ mới
+            if not SessionManager.is_valid(raw):
+                print('  Invalid Session ID. Use 3-32 chars, letters/numbers/dash/underscore.')
+                continue
+
+            SessionManager.print_session_info(raw)
+
+            # Hỏi có lưu không (nếu chưa có trong book)
+            if not SessionBook.exists(raw):
+                save_choice = input('  Lưu session này để dùng lại sau? (Y/n): ').strip().lower()
+                if save_choice != 'n':
+                    SessionBook.add(raw)
+                    print(f'{Color.GREEN}  ✔  Đã lưu "{raw}".{Color.RESET}')
+
+            return raw
 
     @staticmethod
     def _handle_key_setup() -> None:

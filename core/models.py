@@ -77,3 +77,9 @@ class SessionPorts:
     ssh_port:     int
     rdp_port:     int
     custom_port:  int
+
+
+@dataclass
+class SavedSession:
+    session_id: str       # cũng dùng làm tên hiển thị
+    role:       'MachineRole' = MachineRole.MachineA

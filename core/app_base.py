@@ -14,6 +14,7 @@ from core.config_manager import ConfigManager, DefaultVpsProvider
 from core.tunnel_monitor import TunnelMonitor
 from core.key_manager import KeyManager, KeyMode
 from core.connection_handler_base import ConnectionHandlerBase
+from core.session_book import SessionBook
 
 
 class AppBase(ABC):
@@ -57,6 +58,7 @@ class AppBase(ABC):
             elif choice == '7': self._show_log()
             elif choice == '8': self._run_setup()
             elif choice == '9': self._toggle_auto_reconnect()
+            elif choice == 's': self._switch_session()
             elif choice in ('0', 'q', 'quit', 'exit'): break
             else: print('  Unknown option — try again.')
 
@@ -94,6 +96,71 @@ class AppBase(ABC):
             self._monitor.stop_all()
         self._cfg     = ConfigManager.run_setup_wizard()
         self._monitor = TunnelMonitor(self._cfg)
+
+    def _switch_session(self) -> None:
+        """Hiện bảng saved sessions, cho phép switch và tự start tunnel."""
+        from core.config_manager import DEFAULT_VPS_HOST
+        entries = SessionBook.load()
+
+        if not entries:
+            print('\n  Chưa có session nào được lưu.')
+            print('  Dùng [8] Setup wizard để thêm session mới.')
+            return
+
+        # Probe trạng thái máy B
+        print(f'\n{Color.CYAN}  Đang kiểm tra trạng thái máy B...{Color.RESET}')
+        vps_host = self._cfg.vps.host if self._cfg.vps.host else DEFAULT_VPS_HOST
+        SessionBook.probe_all(entries, vps_host)
+        SessionBook.print_table(entries, self._cfg.session_id)
+
+        print('\n  Nhập số để switch, [D] xóa session, [0] quay lại:')
+
+        while True:
+            raw = input('  Choice: ').strip().lower()
+
+            if raw == '0':
+                return
+
+            if raw == 'd':
+                del_raw = input('  Nhập số session muốn xóa: ').strip()
+                if del_raw.isdigit():
+                    idx = int(del_raw) - 1
+                    if 0 <= idx < len(entries):
+                        removed = entries[idx].session_id
+                        SessionBook.remove(removed)
+                        print(f'{Color.YELLOW}  ✔  Đã xóa "{removed}".{Color.RESET}')
+                        return
+                print('  Số không hợp lệ.')
+                continue
+
+            if raw.isdigit():
+                idx = int(raw) - 1
+                if 0 <= idx < len(entries):
+                    new_session = entries[idx].session_id
+                    if new_session == self._cfg.session_id:
+                        print(f'  Session "{new_session}" đang được dùng rồi.')
+                        return
+
+                    # Dừng tunnel hiện tại
+                    if self._monitor.is_running:
+                        Logger.info('Dừng tunnel hiện tại...')
+                        self._monitor.stop_all()
+
+                    # Đổi session và rebuild tunnels
+                    self._cfg.session_id = new_session
+                    self._cfg.tunnels = ConfigManager._build_tunnels(new_session)
+                    ConfigManager.save(self._cfg)
+
+                    # Start tunnel mới
+                    self._monitor = TunnelMonitor(self._cfg)
+                    self._monitor.start_all()
+                    Logger.success(f'Switched to "{new_session}" — tunnel đã start.')
+                    return
+
+                print(f'  Số không hợp lệ (1-{len(entries)}).')
+                continue
+
+            print('  Nhập số hợp lệ, [D] hoặc [0].')
 
     def _toggle_auto_reconnect(self) -> None:
         self._cfg.auto_reconnect = not self._cfg.auto_reconnect
@@ -199,6 +266,7 @@ class AppBase(ABC):
         print('  [7] View log')
         print('  [8] Setup wizard (change session / VPS / role)')
         print(f'  [9] Toggle auto-reconnect (currently: {"ON" if self._cfg.auto_reconnect else "OFF"})')
+        print('  [S] Switch session (saved sessions)')
         print('  [0] Quit')
 
     @property
