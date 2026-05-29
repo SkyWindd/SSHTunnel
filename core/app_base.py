@@ -229,12 +229,11 @@ class AppBase(ABC):
 
         try:
             import platform
+            KeyManager.encrypt_plain_key(pwd)
             if platform.system() != 'Windows':
-                KeyManager.encrypt_plain_key_linux(pwd)
                 plain_name = 'default_vps.pem'
                 enc_name   = 'default_vps.pem.enc'
             else:
-                KeyManager.encrypt_plain_key(pwd)
                 plain_name = 'default_vps.ppk'
                 enc_name   = 'default_vps.ppk.enc'
             print(f'{Color.GREEN}\n  ✔  Mã hóa thành công!{Color.RESET}')

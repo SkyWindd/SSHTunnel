@@ -16,3 +16,5 @@ config.json
 
 # Log file
 tunnel.log
+
+session_book.json
